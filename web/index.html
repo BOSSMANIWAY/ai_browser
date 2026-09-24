@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Browser Agent</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0f0f0f; --bg2: #1a1a1a; --bg3: #252525; --bg4: #2a2a2a;
+            --text: #e8e8e8; --text2: #999; --text3: #666;
+            --accent: #6366f1; --accent2: #818cf8; --accent-glow: rgba(99,102,241,0.3);
+            --green: #22c55e; --red: #ef4444; --border: #333;
+            --radius: 12px; --radius-sm: 8px;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
+        
+        /* Layout */
+        .app { display: flex; height: 100vh; }
+        
+        /* Sidebar */
+        .sidebar { width: 280px; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); }
+        .sidebar-header h1 { font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+        .sidebar-header h1 .icon { font-size: 24px; }
+        .conn-status { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 12px; background: var(--bg3); border-radius: var(--radius-sm); font-size: 13px; cursor: pointer; transition: background 0.2s; }
+        .conn-status:hover { background: var(--bg4); }
+        .conn-status.connecting { background: var(--accent); }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text3); transition: background 0.3s; }
+        .status-dot.on { background: var(--green); box-shadow: 0 0 8px rgba(34,197,94,0.5); }
+        .status-dot.connecting { background: var(--accent); animation: pulse 1s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.4} }
+        .model-select { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+        .model-select label { font-size: 11px; text-transform: uppercase; color: var(--text3); letter-spacing: 1px; }
+        .model-select select { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; color: var(--text); font-size: 12px; outline: none; cursor: pointer; }
+        .model-select select:focus { border-color: var(--accent); }
+        .model-select select option { background: var(--bg3); color: var(--text); }
+        .tabs-panel { flex: 1; overflow-y: auto; padding: 16px; }
+        .tabs-panel h3 { font-size: 12px; text-transform: uppercase; color: var(--text3); letter-spacing: 1px; margin-bottom: 12px; }
+        .tab-item { padding: 10px 12px; background: var(--bg3); border-radius: var(--radius-sm); margin-bottom: 8px; cursor: pointer; transition: all 0.2s; font-size: 13px; }
+        .tab-item:hover { background: var(--bg4); transform: translateX(4px); }
+        .tab-item .title { font-weight: 500; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .tab-item .url { font-size: 11px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
+        /* Main */
+        .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+        
+        /* Chat */
+        .chat { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+        
+        /* Welcome */
+        .welcome { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+        .welcome .logo { font-size: 64px; margin-bottom: 20px; }
+        .welcome h2 { font-size: 28px; font-weight: 600; margin-bottom: 12px; }
+        .welcome p { color: var(--text2); max-width: 500px; line-height: 1.6; }
+        .features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 40px; text-align: left; }
+        .feature { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+        .feature .icon { font-size: 28px; margin-bottom: 10px; }
+        .feature h4 { font-size: 14px; margin-bottom: 6px; }
+        .feature p { font-size: 12px; color: var(--text3); }
+        
+        /* Messages */
+        .msg { max-width: 80%; padding: 14px 18px; border-radius: var(--radius); font-size: 14px; line-height: 1.6; animation: fadeIn 0.3s; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .msg.user { align-self: flex-end; background: var(--accent); color: white; border-bottom-right-radius: 4px; }
+        .msg.ai { align-self: flex-start; background: var(--bg2); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+        .msg.system { align-self: center; background: transparent; border: 1px solid var(--border); color: var(--text2); font-size: 13px; text-align: center; padding: 10px 20px; }
+        .msg.error { border-color: var(--red); color: var(--red); }
+        .msg pre { background: var(--bg); padding: 12px; border-radius: var(--radius-sm); margin-top: 10px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+        .msg img { max-width: 100%; max-height: 300px; border-radius: var(--radius-sm); margin-top: 10px; border: 1px solid var(--border); }
+        
+        /* Progress */
+        .progress { margin-top: 12px; }
+        .progress-step { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; font-size: 13px; }
+        .progress-step .num { background: var(--accent); color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex-shrink: 0; }
+        .progress-step .content { flex: 1; }
+        .progress-step .action { font-weight: 500; margin-bottom: 2px; }
+        .progress-step .thought { color: var(--text2); font-size: 12px; }
+        .progress-step .result { color: var(--green); font-size: 12px; margin-top: 2px; }
+        .progress-step .result.error { color: var(--red); }
+        
+        /* Agent thoughts */
+        .agent-thought { align-self: flex-start; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; font-size: 13px; line-height: 1.5; max-width: 85%; margin-top: 8px; }
+        .agent-thought .thought-text { color: var(--text2); }
+        .agent-thought .action-text { color: var(--accent2); font-weight: 500; margin-top: 6px; }
+        .agent-thought .result-text { color: var(--green); margin-top: 4px; font-size: 12px; }
+        .agent-thought .result-text.error { color: var(--red); }
+        
+        /* Input */
+        .input-bar { padding: 20px 24px; background: var(--bg2); border-top: 1px solid var(--border); }
+        .input-row { display: flex; gap: 12px; align-items: flex-end; }
+        .input-row textarea { flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 18px; color: var(--text); font-size: 14px; font-family: inherit; resize: none; outline: none; transition: border-color 0.2s; max-height: 120px; min-height: 48px; }
+        .input-row textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+        .input-row textarea::placeholder { color: var(--text3); }
+        .send-btn { background: var(--accent); border: none; border-radius: var(--radius); width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; flex-shrink: 0; }
+        .send-btn:hover { background: var(--accent2); transform: scale(1.05); }
+        .send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .send-btn svg { width: 20px; height: 20px; fill: white; }
+        .quick-btns { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+        .quick-btn { background: var(--bg3); border: 1px solid var(--border); border-radius: 20px; padding: 6px 14px; font-size: 12px; color: var(--text2); cursor: pointer; transition: all 0.2s; }
+        .quick-btn:hover { background: var(--bg4); color: var(--text); border-color: var(--accent); }
+        
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1><span class="icon"></span> AI Browser</h1>
+                <div class="conn-status" id="connStatus" onclick="toggleConnect()">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="statusText">Не подключено</span>
+                </div>
+                <div class="model-select">
+                    <label>Модель</label>
+                    <select id="providerSelect" onchange="onProviderChange()">
+                        <option value="pplx">Perplexity AI</option>
+                        <option value="kimi">Kimi</option>
+                        <option value="ollama">Ollama</option>
+                        <option value="openai">OpenAI (GPT)</option>
+                    </select>
+                    <select id="modelSelect" onchange="onModelChange()"></select>
+                </div>
+            </div>
+            <div class="tabs-panel">
+                <h3>Вкладки</h3>
+                <div id="tabsList"><div style="color:var(--text3);font-size:13px;padding:20px;text-align:center;">Подключитесь к Chrome</div></div>
+            </div>
+        </div>
+
+        <!-- Main -->
+        <div class="main">
+            <!-- Chat area -->
+            <div class="chat" id="chatArea">
+                <!-- Welcome (показывается пока нет сообщений) -->
+                <div class="welcome" id="welcomeScreen">
+                    <div class="logo">🌐</div>
+                    <h2>AI Browser Agent</h2>
+                    <p>ИИ-агент, управляющий вашим браузером. Подключитесь к Chrome и начните задавать задачи.</p>
+                    <div class="features">
+                        <div class="feature"><h4>Поиск и анализ</h4><p>Найдите информацию на любом сайте</p></div>
+                        <div class="feature"><h4>Заполнение форм</h4><p>Автоматическое заполнение полей</p></div>
+                        <div class="feature"><h4>Управление вкладками</h4><p>Открытие, группировка, сортировка</p></div>
+                        <div class="feature"><h4>Скриншоты</h4><p>Пошаговый прогресс с фото</p></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input -->
+            <div class="input-bar">
+                <div class="input-row" id="userInputRow" style="display:none; margin-bottom:10px;">
+                    <input id="userInputField" type="text" placeholder="Код из SMS / данные для агента (можно в любой момент)..."
+                           style="flex:1; background:var(--bg3); border:1px solid var(--accent); border-radius:var(--radius); padding:12px 16px; color:var(--text); font-size:14px; outline:none;"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();sendUserInput();}">
+                    <button class="send-btn" onclick="sendUserInput()" title="Передать агенту"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
+                </div>
+                <div class="input-row">
+                    <textarea id="msgInput" placeholder="Опишите задачу для агента..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMsg();}"></textarea>
+                    <button class="send-btn" id="netBtn" onclick="insertNetworkReport()" style="background:var(--bg3);border:1px solid var(--border);" title="Вставить отчёт по сети активной вкладки (аналог вкладки Сеть в DevTools) — не отправляет, только вставляет в поле ввода"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="fill:none;"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M12 11.5L6.5 17M12 11.5l5.5 5.5"/></svg></button>
+                    <button class="send-btn" id="sendBtn" onclick="sendMsg()"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
+                    <button class="send-btn" id="stopBtn" onclick="stopTask()" style="background:var(--red);display:none;" title="Остановить задачу"><svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null, connected = false, processing = false;
+        let currentProvider = "pplx";
+        let currentModel = "claude47opus";
+
+        // Список моделей для каждого провайдера
+        const MODELS = {
+            pplx: [
+                {id: "claude47opus", name: "Claude 4.7 Opus (Pplx)", best: true},
+                {id: "claude46sonnet", name: "Claude 4.6 Sonnet (Pplx)"},
+                {id: "gpt55", name: "GPT-5.5 (Pplx)"},
+                {id: "gpt54", name: "GPT-5.4 (Pplx)"},
+                {id: "grok4", name: "Grok 4 (Pplx)"},
+                {id: "claudecode", name: "Claude Code (Pplx)"},
+                {id: "codex4", name: "Codex 4 (Pplx)"},
+                {id: "gemini30flash", name: "Gemini 3.0 Flash (Pplx)"},
+                {id: "o3pro", name: "o3 Pro (Pplx)"},
+                {id: "turbo", name: "Turbo (Pplx)"},
+            ],
+            kimi: [
+                {id: "k2d5", name: "K2 D5 (Kimi)", best: true},
+                {id: "k2", name: "K2 (Kimi)"},
+                {id: "moonshot-v1-8k", name: "Moonshot v1 8K"},
+                {id: "moonshot-v1-32k", name: "Moonshot v1 32K"},
+                {id: "moonshot-v1-128k", name: "Moonshot v1 128K"},
+            ],
+            ollama: [
+                {id: "qwen3:235b-a22b", name: "Qwen3 235B (Ollama)", best: true},
+                {id: "qwen3:32b", name: "Qwen3 32B (Ollama)"},
+                {id: "qwen3:8b", name: "Qwen3 8B (Ollama)"},
+                {id: "claude46sonnet", name: "Claude 4.6 Sonnet (Ollama)"},
+                {id: "gpt55", name: "GPT-5.5 (Ollama)"},
+                {id: "deepseek-r1:70b", name: "DeepSeek R1 70B (Ollama)"},
+                {id: "llama3.3:70b", name: "Llama 3.3 70B (Ollama)"},
+            ],
+            openai: [
+                {id: "gpt-5.1", name: "GPT-5.1 (OpenAI)", best: true},
+                {id: "gpt-5", name: "GPT-5 (OpenAI)"},
+                {id: "gpt-4o", name: "GPT-4o (OpenAI)"},
+                {id: "o3", name: "o3 (OpenAI)"},
+                {id: "o4-mini", name: "o4 Mini (OpenAI)"},
+                {id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4 (OpenAI)"},
+                {id: "claude-opus-4-20250514", name: "Claude Opus 4 (OpenAI)"},
+                {id: "gemini-2.5-pro", name: "Gemini 2.5 Pro (OpenAI)"},
+            ],
+        };
+
+        // Загрузка моделей при старте
+        function loadModels(provider) {
+            const models = MODELS[provider] || [];
+            const sel = document.getElementById('modelSelect');
+            sel.innerHTML = models.map(m => 
+                `<option value="${m.id}" ${m.best ? 'title="Лучшая"' : ''}>${m.name}</option>`
+            ).join('');
+            if (models.length > 0) {
+                currentModel = models.find(m => m.best)?.id || models[0].id;
+                sel.value = currentModel;
+            }
+        }
+
+        function onProviderChange() {
+            currentProvider = document.getElementById('providerSelect').value;
+            loadModels(currentProvider);
+        }
+
+        function onModelChange() {
+            currentModel = document.getElementById('modelSelect').value;
+        }
+
+        function connect() {
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${proto}//${location.host}/ws/client`);
+            ws.onopen = () => { console.log(' WS connected'); };
+            ws.onmessage = (e) => {
+                console.log('📨 WS message:', e.data);
+                handle(JSON.parse(e.data));
+            };
+            ws.onclose = (e) => {
+                console.log('❌ WS closed:', e.code, e.reason);
+                connected = false;
+                setStatus(false);
+            };
+            ws.onerror = (e) => console.error('[ERROR] WS error', e);
+        }
+
+        function handle(d) {
+            switch(d.type) {
+                case 'connected':
+                    connected = true; setStatus(true);
+                    addMsg('ai', d.message);
+                    updateTabs(d.tabs);
+                    break;
+                case 'disconnected':
+                    connected = false; setStatus(false);
+                    addMsg('system', d.message);
+                    break;
+                case 'status': addMsg('system', d.message); break;
+                case 'progress':
+                    addAgentThought(d.task_id, d.text);
+                    // Показать поле передачи данных, когда агент ждёт ввода
+                    if(d.text && d.text.includes('ОЖИДАНИЕ ДАННЫХ ОТ ПОЛЬЗОВАТЕЛЯ')) {
+                        document.getElementById('userInputRow').style.display = 'flex';
+                        document.getElementById('userInputField').focus();
+                    }
+                    break;
+                case 'step_screenshot': addScreenshot(d.task_id, d.step, d.url, d.title, d.screenshot); break;
+                case 'task_start':
+                    addMsg('system', ` Задача: ${d.prompt}`);
+                    // Поле передачи данных доступно всё время работы агента
+                    document.getElementById('userInputRow').style.display = 'flex';
+                    document.getElementById('stopBtn').style.display = 'flex';
+                    break;
+                case 'task_complete': addMsg('ai', ` ${d.reason}`); break;
+                case 'task_end':
+                    processing = false;
+                    document.getElementById('sendBtn').disabled = false;
+                    document.getElementById('userInputRow').style.display = 'none';
+                    document.getElementById('stopBtn').style.display = 'none';
+                    break;
+                case 'error': addMsg('error', `[ERROR] ${d.message}`); processing = false; document.getElementById('sendBtn').disabled = false; document.getElementById('stopBtn').style.display = 'none'; break;
+                case 'tabs': updateTabs(d.tabs); break;
+                case 'summary': addMsg('ai', ` ${d.text}`); break;
+                case 'screenshot': addScreenshot(null, null, null, null, d.data.screenshot); break;
+                case 'groups':
+                    let txt = '📁 Группировка:\n\n';
+                    for(const [name, tabs] of Object.entries(d.groups)) {
+                        txt += `**${name}:**\n`;
+                        tabs.forEach(t => txt += `  • ${t.title}\n`);
+                        txt += '\n';
+                    }
+                    addMsg('ai', txt);
+                    break;
+            }
+        }
+
+        function addMsg(type, text) {
+            const chat = document.getElementById('chatArea');
+            const w = document.getElementById('welcomeScreen');
+            if(w) w.style.display = 'none';
+            const m = document.createElement('div');
+            m.className = `msg ${type}`;
+            text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+            m.innerHTML = text;
+            chat.appendChild(m);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function addAgentThought(tid, text) {
+            const lines = text.split('\n');
+            const actionLine = lines[0] || '';
+            const resultLine = lines[2] || '';
+
+            // Парсим тип действия
+            const actionMatch = actionLine.match(/Шаг \d+: (\S+)/);
+            const actionType = actionMatch ? actionMatch[1] : actionLine;
+
+            // Парсим результат
+            let result = '';
+            let isError = false;
+            if (resultLine.startsWith('[ERROR]')) {
+                result = resultLine.substring(7).trim();
+                isError = true;
+            } else if (resultLine.startsWith('[RESULT]')) {
+                result = resultLine.substring(8).trim();
+            } else if (resultLine.startsWith('[GOAL]')) {
+                result = resultLine.substring(6).trim();
+            } else if (resultLine.startsWith('[NOTICE]')) {
+                result = resultLine.substring(8).trim();
+            } else if (resultLine.startsWith('[WAIT]')) {
+                result = resultLine.substring(6).trim();
+            } else if (resultLine.startsWith('[INFO]')) {
+                result = resultLine.substring(6).trim();
+            } else if (resultLine.startsWith('[REJECTED]')) {
+                result = resultLine.substring(10).trim();
+                isError = true;
+            } else if (resultLine.startsWith('[USER]')) {
+                result = resultLine.substring(6).trim();
+            } else if (resultLine.startsWith('[PLAN]')) {
+                result = resultLine.substring(6).trim();
+            } else if (resultLine.trim()) {
+                result = resultLine.trim();
+            }
+
+            const chat = document.getElementById('chatArea');
+            const m = document.createElement('div');
+            m.className = 'agent-thought';
+
+            let h = '';
+            if (actionType && actionType !== 'wait') {
+                h += `<div class="action-text">→ ${actionType}</div>`;
+            }
+            if (result) {
+                h += `<div class="result-text ${isError ? 'error' : ''}">${isError ? '[ERROR]' : ''} ${result}</div>`;
+            }
+
+            m.innerHTML = h;
+            chat.appendChild(m);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function addScreenshot(tid, step, url, title, ss) {
+            const chat = document.getElementById('chatArea');
+            const m = document.createElement('div');
+            m.className = 'msg ai';
+            let h = '';
+            if(step) h += `<div style="font-size:12px;color:var(--text2);margin-bottom:8px;">[STEP] Шаг ${step}: ${url}</div>`;
+            if(ss) h += `<img src="data:image/png;base64,${ss}" alt="Screenshot">`;
+            m.innerHTML = h;
+            chat.appendChild(m);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function updateTabs(tabs) {
+            const list = document.getElementById('tabsList');
+            if(!tabs || !tabs.length) { list.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:20px;text-align:center;">Нет вкладок</div>'; return; }
+            list.innerHTML = tabs.map(t => `<div class="tab-item" onclick="switchTab('${t.tab_id}')"><div class="title">${t.title||'Без заголовка'}</div><div class="url">${t.url}</div></div>`).join('');
+        }
+
+        function setStatus(on) {
+            const dot = document.getElementById('statusDot');
+            const txt = document.getElementById('statusText');
+            if(on) { dot.classList.add('on'); txt.textContent = 'Подключено'; }
+            else { dot.classList.remove('on'); txt.textContent = 'Не подключено'; }
+        }
+
+        function toggleConnect() {
+            if(connected) {
+                if(ws) ws.send(JSON.stringify({action:'disconnect'}));
+            } else {
+                setStatus(false);
+                if(ws) ws.send(JSON.stringify({action:'connect'}));
+            }
+        }
+
+        function sendMsg() {
+            const input = document.getElementById('msgInput');
+            const text = input.value.trim();
+            if(!text || processing) return;
+            addMsg('user', text);
+            input.value = '';
+            input.style.height = 'auto';
+            if(!connected) { addMsg('system', ' Сначала подключитесь к Chrome'); return; }
+            processing = true;
+            document.getElementById('sendBtn').disabled = true;
+            ws.send(JSON.stringify({
+                action: 'task',
+                payload: {
+                    prompt: text,
+                    provider: currentProvider,
+                    model: currentModel
+                }
+            }));
+        }
+
+        function quick(text) { document.getElementById('msgInput').value = text; sendMsg(); }
+
+        // Вставить отчёт по сети активной вкладки в поле ввода (НЕ отправляет)
+        async function insertNetworkReport() {
+            const btn = document.getElementById('netBtn');
+            const input = document.getElementById('msgInput');
+            if(!ws || !connected) { addMsg('system', ' Сначала подключитесь к Chrome'); return; }
+            btn.disabled = true;
+            addMsg('system', ' Считываю сетевую активность вкладки (8 сек)...');
+            try {
+                const resp = await fetch('/api/network_report');
+                const data = await resp.json();
+                if(data.error) {
+                    addMsg('error', '[ERROR] ' + data.error);
+                    return;
+                }
+                // Вставляем в поле ввода — пользователь сам допишет и отправит
+                const prefix = input.value ? input.value + '\n\n' : '';
+                input.value = prefix + data.report + '\n\n';
+                input.style.height = 'auto';
+                input.style.height = Math.min(input.scrollHeight, 300) + 'px';
+                input.focus();
+                addMsg('system', ` Отчёт по сети вставлен в поле ввода (${data.total} запросов). Допишите задачу и отправьте.`);
+            } catch(e) {
+                addMsg('error', '[ERROR] Не удалось получить отчёт: ' + e.message);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Передача данных агенту (код из SMS, пароль и т.п.) во время wait_user
+        function sendUserInput() {
+            const input = document.getElementById('userInputField');
+            const text = input.value.trim();
+            if(!text || !ws) return;
+            ws.send(JSON.stringify({action: 'user_input', payload: {value: text}}));
+            addMsg('user', `[USER] Передано агенту: ${text}`);
+            input.value = '';
+        }
+
+        function switchTab(id) { if(ws) ws.send(JSON.stringify({action:'switch_tab', payload:{tab_id:id}})); }
+
+        function stopTask() {
+            if(!ws || !processing) return;
+            ws.send(JSON.stringify({action: 'stop_task', payload: {}}));
+            addMsg('system', ' Остановка задачи...');
+            processing = false;
+            document.getElementById('sendBtn').disabled = false;
+            document.getElementById('stopBtn').style.display = 'none';
+        }
+
+        // Auto-resize textarea
+        document.getElementById('msgInput').addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        });
+
+        connect();
+    </script>
+</body>
+</html>

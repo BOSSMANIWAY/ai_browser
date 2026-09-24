@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Локальные данные и артефакты времени выполнения
+ai_browser_profile/
+ai_browser_sessions/
+ai_browser.log
+*.log
+*.har
+
+# Секреты и персональные данные — НЕ КОММИТИТЬ
+agent/user_profile.py
+.pplx_cookies.txt
+pplx_cookies.txt
+*.env
+.env
+.env.*
+
+# macOS / редакторы
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Установка зависимостей
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Синтаксис всех модулей
+        run: python -m compileall -q .
+
+      - name: STATE_JS валиден (node --check)
+        run: |
+          python - <<'PY'
+          import subprocess, sys
+          sys.path.insert(0, ".")
+          from browser.browser_state import STATE_JS
+          with open("/tmp/state.js", "w") as f:
+              f.write("(" + STATE_JS + ")")
+          r = subprocess.run(["node", "--check", "/tmp/state.js"],
+                             capture_output=True, text=True)
+          print(r.stderr or "OK")
+          sys.exit(r.returncode)
+          PY
+
+      - name: Реестр провайдеров самодостаточен
+        run: |
+          python - <<'PY'
+          import json, sys
+          sys.path.insert(0, ".")
+          from agent.providers import PROVIDERS, list_providers, get_provider
+
+          # исторические ключи, на которые опираются код и тесты
+          for k in ("pplx", "kimi", "ollama", "openai"):
+              assert k in PROVIDERS, f"пропал ключ {k}"
+
+          specs = list_providers()
+          json.dumps(specs)  # контракт /api/providers сериализуем
+          for p in specs:
+              assert p["default_model"], p["key"]
+              assert p["models"], p["key"]
+              for f in ("key", "label", "kind", "vision",
+                        "requires_key", "key_env", "has_key"):
+                  assert f in p, (p["key"], f)
+          assert get_provider("nope") is None
+          print(f"OK: {len(specs)} провайдеров")
+          PY
+
+      - name: LLMClient импортируется и контракт не сломан
+        run: |
+          python - <<'PY'
+          import asyncio, inspect, sys
+          sys.path.insert(0, ".")
+          from agent.llm_client import (LLMClient, MODELS, PPLX_COOKIES,
+                                        PPLX_ACCOUNT_ID, REQUEST_UUID,
+                                        RUM_SESSION_ID)
+          c = LLMClient(provider="pplx", model="claude47opus")
+          assert c.provider == "pplx" and c.model == "claude47opus"
+          assert inspect.iscoroutinefunction(LLMClient.chat)
+          assert inspect.iscoroutinefunction(LLMClient.chat_with_image)
+          assert isinstance(MODELS, dict) and MODELS["pplx"][0]["id"]
+          # неизвестный провайдер не должен ронять конструктор
+          LLMClient(provider="zzz")
+          print("OK: контракт LLMClient")
+          PY
+
+      - name: Веб-бэкенд собирается
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, ".")
+          import web_backend
+          print("OK: app", bool(web_backend.app))
+          PY
+
+      - name: CLI smoke
+        run: |
+          python main.py --list-providers >/dev/null
+          python main.py --provider nope --task x 2>&1 | grep -qi "pplx"

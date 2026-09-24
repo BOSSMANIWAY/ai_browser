@@ -1,0 +1,45 @@
+name: 🐛 Баг-репорт
+description: Что-то работает не так
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Проверьте, что баг не описан в README (раздел «Отладка») и в открытых issues.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Что произошло
+      description: Фактическое поведение против ожидаемого.
+      placeholder: Агент кликнул «Войти по почте» вместо submit формы…
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Как воспроизвести
+      description: Задача, сайт (без учётных данных), провайдер/модель.
+      placeholder: |
+        1. ./start.sh, провайдер pplx (claude47opus)
+        2. Задача: "финансы озон зайди и залогинся"
+        3. На шаге 6 агент зациклился на e14
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Фрагменты лога
+      description: ai_browser.log — последние ~30 строг шага. **Удалите cookie, токены и персональные данные.**
+      render: shell
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Провайдер LLM
+      options: [pplx, openai, kimi, ollama, deepseek, groq, mistral, openrouter, gemini, xai, lmstudio, localai, другое]
+  - type: input
+    id: env
+    attributes:
+      label: Окружение
+      placeholder: macOS 26 / Python 3.12 / commit 7bd597f
+    validations:
+      required: true

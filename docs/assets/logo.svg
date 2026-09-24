@@ -1,0 +1,29 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AI Browser Agent">
+  <defs>
+    <linearGradient id="ab-badge" x1="12" y1="8" x2="116" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6C5CE7"/>
+      <stop offset=".55" stop-color="#0984E3"/>
+      <stop offset="1" stop-color="#00CEC9"/>
+    </linearGradient>
+    <linearGradient id="ab-glass" x1="32" y1="30" x2="96" y2="94" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff" stop-opacity=".95"/>
+      <stop offset="1" stop-color="#fff" stop-opacity=".72"/>
+    </linearGradient>
+  </defs>
+  <!-- скруглённый бейдж: читается и на белой, и на тёмной теме GitHub -->
+  <rect x="4" y="4" width="120" height="120" rx="30" fill="url(#ab-badge)"/>
+  <!-- окно браузера -->
+  <rect x="22" y="28" width="72" height="56" rx="9" fill="#0B1220" fill-opacity=".30"/>
+  <rect x="22" y="28" width="72" height="14" rx="7" fill="url(#ab-glass)" fill-opacity=".30"/>
+  <circle cx="29.5" cy="35" r="2.4" fill="#FF7675"/>
+  <circle cx="37" cy="35" r="2.4" fill="#FDCB6E"/>
+  <circle cx="44.5" cy="35" r="2.4" fill="#55EFC4"/>
+  <!-- «разум»: нейронные связи на странице -->
+  <path d="M34 68 L48 54 L62 68 M48 54 L48 48" stroke="#74B9FF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="48" cy="54" r="4.6" fill="#A29BFE"/>
+  <circle cx="34" cy="68" r="3.4" fill="#81ECEC"/>
+  <circle cx="62" cy="68" r="3.4" fill="#81ECEC"/>
+  <!-- курсор агента: сам кликает вместо человека -->
+  <path d="M70 62 L104 78 L88 84 L82 99 L74.5 86.5 L64 92 Z"
+        fill="url(#ab-glass)" stroke="#0B1220" stroke-opacity=".35" stroke-width="2.4" stroke-linejoin="round"/>
+</svg>

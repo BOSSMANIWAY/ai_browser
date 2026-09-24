@@ -1,0 +1,32 @@
+name: 💡 Идея / улучшение
+description: Предложить функцию или улучшение
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Проблема или желание
+      description: Что сейчас неудобно/невозможно и зачем это нужно.
+      placeholder: Хочу запускать три вкладки с тремя задачами параллельно…
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Предлагаемое решение
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Альтернативы
+      description: Другие способы решить ту же задачу, которые вы рассмотрели.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Область
+      options:
+        - label: Цикл агента / планировщик
+        - label: Новый LLM-вендор (см. docs/PROVIDERS.md)
+        - label: Веб-интерфейс
+        - label: Документация

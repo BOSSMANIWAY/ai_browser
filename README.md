@@ -1,22 +1,81 @@
-#  AI Browser Agent
+<div align="center">
 
-Автономный ИИ-браузер в стиле Comet Browser. Агент выполняет задачи в реальном Chrome по текстовым инструкциям пользователя: навигация, заполнение форм, авторизация, анализ страниц.
+<img src="docs/assets/logo.svg" width="128" height="128" alt="AI Browser Agent" align="center" />
 
-**Ключевой принцип:** цикл `observe → decide → act → observe → state_diff → verify → goal_check → только потом LLM`. Работа на ЛЮБОМ сайте (включая кросс-origin iframe авторизации), понимание любых запросов человека (включая опечатки) и контекста страницы. Никакой генерации JS-кода и CSS-селекторов — только стабильные element_id.
+# AI Browser Agent
 
-##  Содержание
+### Дай браузеру задачу — он выполнит её сам
 
-- [Архитектура](#-архитектура)
-- [Компоненты](#-компоненты)
+Автономный ИИ-агент в реальном Chrome: навигация, формы, авторизация,
+анализ страниц — по одной текстовой инструкции. Не песочница и не демо —
+работает на настоящих сайтах, включая кросс-origin iframe логина.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-6C5CE7.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-0984E3?logo=python&logoColor=white)](https://www.python.org/)
+[![Chrome via CDP](https://img.shields.io/badge/Chrome-CDP%20%2B%20Playwright-00CEC9?logo=googlechrome&logoColor=white)](https://playwright.dev/python/)
+[![LLM: 12 вендоров](https://img.shields.io/badge/LLM-Perplexity%20·%20OpenAI%20·%20Kimi%20·%20Ollama%20…-A29BFE)](docs/PROVIDERS.md)
+[![CI](https://github.com/BOSSMANIWAY/ai_browser/actions/workflows/ci.yml/badge.svg)](https://github.com/BOSSMANIWAY/ai_browser/actions/workflows/ci.yml)
+
+**Бесплатный ИИ «из коробки»:** Perplexity через cookie вашей браузерной сессии —
+без API-ключей и оплаты. Нужна стабильность — подключите любой API-вендор одной
+переменной окружения.
+
+<a href="demo_ai_brows.mp4">
+  <img src="docs/assets/demo.gif" width="860" alt="Демо: агент проходит авторизацию на реальном сайте" />
+</a>
+
+> ▶ **Нажмите на гифку, чтобы посмотреть полное 4-минутное демо** — [demo_ai_brows.mp4](demo_ai_brows.mp4)
+> (воспроизводится прямо на странице GitHub).
+
+</div>
+
+---
+
+## Возможности
+
+| | |
+|---|---|
+| 🧠 **Понимает человека** | Запросы с опечатками, вольной формулировкой и без URL — «финансы озон зайди и залогинся» будут поняты |
+| 🌐 **Любые сайты** | Кросс-origin iframe (Ozon ID, VK, Госуслуги), shadow DOM, модалки, маски ввода — агент «видит» всё через единый снимок состояния |
+| 🔁 **Честный цикл** | `observe → decide → act → state_diff → verify → goal_check`: клик «сработал» только если страница реально изменилась, успех решает рантайм, а не фантазия LLM |
+| 🛑 **Не зацикливается** | State-based loop breaker: три повтора одного действия → автоматическое recovery без обращения к модели |
+| 📩 **Спрашивает, когда надо** | `wait_user` для SMS-кодов, 2FA и капчи: пауза с полем ввода в UI, мгновенное пробуждение от данных пользователя |
+| 🧾 **Помнит ошибки сайта** | Отвергнутые логин/почему не будут повторены: вердикт модели попадает в память и предупреждает в каждом промпте |
+| 🔌 **12 LLM-вендоров** | Perplexity (бесплатно, через cookie), OpenAI, Kimi, DeepSeek, Groq, Mistral, OpenRouter, Gemini, xAI + локальные Ollama / LM Studio / LocalAI. Новый вендор = одна запись в реестре |
+| 👁 **Vision** | Отправка скриншота страницы в модель — для игровых и визуальных уровней (у vision-провайдеров) |
+| 🖥 **Веб-интерфейс и CLI** | Живой прогресс по WebSocket, выбор модели в UI, `--list-providers` в терминале |
+| 🔒 **Приватность** | Персональные данные — в локальном файле из `.gitignore`; пароли и коды не хранятся; сервер слушает только `127.0.0.1` |
+
+## Быстрый старт
+
+```bash
+git clone https://github.com/BOSSMANIWAY/ai_browser.git && cd ai_browser
+python3 -m venv ../ai_browser_venv && source ../ai_browser_venv/bin/activate
+pip install -r requirements.txt && playwright install chromium
+./start.sh                      # → http://127.0.0.1:8765
+```
+
+Введите задачу — агент подключит Chrome и начнёт работать.
+Хотите свою модель: `cp .env.example .env`, заполните ключ одного провайдера,
+`python3 main.py --list-providers` покажет, кто готов. Подробности — [Запуск](#-запуск)
+и [docs/PROVIDERS.md](docs/PROVIDERS.md).
+
+## Содержание
+
+- [Возможности](#возможности)
+- [Быстрый старт](#быстрый-старт)
+- [Архитектура](#архитектура)
+- [Компоненты](#компоненты)
 - [Цикл агента v2.1](#-цикл-агента-v21)
 - [Запуск](#-запуск)
-- [Использование](#-использование)
-- [Действия агента](#-действия-агента)
-- [Профиль пользователя](#-профиль-пользователя)
+- [Использование](#использование)
+- [Действия агента](#действия-агента)
+- [Профиль пользователя](#профиль-пользователя)
 - [Ожидание данных от пользователя](#-ожидание-данных-от-пользователя)
-- [Сессии и память](#-сессии-и-память)
-- [Веб-интерфейс](#-веб-интерфейс)
-- [Отладка](#-отладка)
+- [Сессии и память](#сессии-и-память)
+- [Веб-интерфейс](#веб-интерфейс)
+- [Подключение LLM-вендоров](docs/PROVIDERS.md)
+- [Отладка](#отладка)
 
 ---
 
@@ -158,7 +217,7 @@ while running and step < max_steps:
 
 ---
 
-##  Запуск
+## 🚀 Запуск
 
 ### 1. Подготовка Chrome
 
@@ -350,8 +409,8 @@ ai_browser_sessions/<timestamp>/
 ```bash
 source ../ai_browser_venv/bin/activate
 
-# Синтаксис
-python3 -c "import ast; ast.parse(open('agent/loop.py').read())"
+# Синтаксис всего дерева
+python3 -m compileall -q .
 
 # STATE_JS через node
 python3 -c "
@@ -364,11 +423,13 @@ print('OK' if r.returncode == 0 else r.stderr)
 # Импорт всего приложения
 python3 -c "from web_backend import app"
 
-# Юнит-тесты planner
-python3 -m pytest test_planner.py -v  # 10/10
+# Тесты-скрипты (без браузера и сети): логика модалок, анти-луп, парсер
+PYTHONPATH=. python3 tests/test_dialog_logic.py
 ```
 
-**Важно:** файлы после write_file могут терять первую строку — всегда проверять `ast.parse` + импорт в venv (вне venv нет fastapi/playwright).
+CI (`.github/workflows/ci.yml`) прогоняет эти же проверки на каждом push/PR.
+Остальные скрипты в `tests/` требуют запущенного Chrome или ключей вендоров —
+они не входят в CI.
 
 ---
 
@@ -439,15 +500,38 @@ ai_browser/
 
 ---
 
-## Безопасность
+## 🔒 Безопасность
 
 - `agent/user_profile.py` и `ai_browser_profile/` в `.gitignore` — персональные данные не коммитятся
 - Пароли и коды не хранятся — передаются через wait_user в момент необходимости
+- API-ключи и cookie-сессии читаются только из окружения/локальных файлов, в репозиторий не попадают (`.env`, `.pplx_cookies.txt` в `.gitignore`)
+- `/api/providers` отдаёт лишь факт наличия ключа, никогда — сам ключ
 - WebSocket только на `127.0.0.1`
 - Chrome с изолированным persistent profile
 
+Нашли уязвимость? Сообщите приватно — см. [SECURITY.md](SECURITY.md).
+
 ---
 
-## Лицензия
+## 🗺 Roadmap
 
-Private project. All rights reserved.
+- [x] Единый реестр LLM-вендоров + OpenAI-совместимый транспорт + vision
+- [x] Бесплатный путь: Perplexity через cookie браузерной сессии
+- [x] Веб-UI с выбором провайдера/модели из API (`GET /api/providers`)
+- [ ] Параллельные вкладки/подзадачи в одном прогоне
+- [ ] Скачивание файлов и работа с диалогами ОС
+- [ ] Плагин-система действий поверх реестра провайдеров
+- [ ] Экспорт сессий в переиспользуемые «рецепты» задач
+
+Предложения — в [Issues](https://github.com/BOSSMANIWAY/ai_browser/issues).
+
+---
+
+## 🤝 Участие
+
+Приветствуются PR: новые провайдеры в реестр, фиксы цикла агента, документы.
+Гайд — [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## 📄 Лицензия
+
+MIT — см. [LICENSE](LICENSE).

@@ -20,6 +20,8 @@ pplx_cookies.txt
 *.env
 .env
 .env.*
+# ...но шаблон без секретов коммитим: он и есть инструкция по подключению
+!.env.example
 
 # macOS / редакторы
 .DS_Store

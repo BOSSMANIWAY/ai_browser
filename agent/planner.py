@@ -58,7 +58,7 @@ TOOL_SYNONYMS = {
 class AgentPlanner:
     """Планировщик v2: BrowserState → LLM → {plan, thought, action}"""
 
-    def __init__(self, llm_client: Any, model: str = "claude47opus"):
+    def __init__(self, llm_client: Any, model: str = ""):
         self.llm_client = llm_client
         self.model = model
 

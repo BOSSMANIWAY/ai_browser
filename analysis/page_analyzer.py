@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class PageAnalyzer:
     """Анализатор содержимого страниц"""
 
-    def __init__(self, llm_client: Any, model: str = "claude47opus"):
+    def __init__(self, llm_client: Any, model: str = ""):
         self.llm_client = llm_client
         self.model = model
 

@@ -1,6 +1,14 @@
 """
-LLM Client Adapter - Универсальный адаптер для LLM
-Прямые HTTP-вызовы к Perplexity API (через cookies), Kimi API, Ollama API, OpenAI API
+LLM Client Adapter - Универсальный адаптер для LLM.
+
+Транспорты выбираются по реестру agent/providers.py (kind провайдера):
+  • openai — OpenAI-совместимый /chat/completions (OpenAI, Kimi, DeepSeek,
+             Groq, Mistral, OpenRouter, Gemini, xAI, LM Studio, LocalAI …)
+  • ollama — нативный /api/chat локального Ollama
+  • pplx   — Perplexity через cookies-сессию (curl + SSE)
+
+Новый вендор подключается записью в PROVIDERS (или register_provider), без
+правок в этом файле.
 """
 
 import asyncio
@@ -12,6 +20,8 @@ import tempfile
 import time
 import uuid as _uuid
 from typing import Optional, List
+
+from agent.providers import PROVIDERS, ProviderSpec, get_provider
 
 logger = logging.getLogger(__name__)
 
@@ -43,82 +53,65 @@ REQUEST_UUID = os.environ.get("PPLX_REQUEST_UUID") or str(_uuid.uuid4())
 RUM_SESSION_ID = os.environ.get("PPLX_RUM_SESSION_ID") or str(_uuid.uuid4())
 PPLX_CONTEXT_UUID = os.environ.get("PPLX_CONTEXT_UUID") or str(_uuid.uuid4())
 
-# Список самых умных моделей для каждого провайдера
-MODELS = {
-    "pplx": [
-        {"id": "claude47opus", "name": "Claude 4.7 Opus (Pplx)", "best": True},
-        {"id": "claude46sonnet", "name": "Claude 4.6 Sonnet (Pplx)"},
-        {"id": "gpt55", "name": "GPT-5.5 (Pplx)"},
-        {"id": "gpt54", "name": "GPT-5.4 (Pplx)"},
-        {"id": "grok4", "name": "Grok 4 (Pplx)"},
-        {"id": "claudecode", "name": "Claude Code (Pplx)"},
-        {"id": "codex4", "name": "Codex 4 (Pplx)"},
-        {"id": "gemini30flash", "name": "Gemini 3.0 Flash (Pplx)"},
-        {"id": "o3pro", "name": "o3 Pro (Pplx)"},
-        {"id": "turbo", "name": "Turbo (Pplx)"},
-    ],
-    "kimi": [
-        {"id": "k2d5", "name": "K2 D5 (Kimi)", "best": True},
-        {"id": "k2", "name": "K2 (Kimi)"},
-        {"id": "moonshot-v1-8k", "name": "Moonshot v1 8K"},
-        {"id": "moonshot-v1-32k", "name": "Moonshot v1 32K"},
-        {"id": "moonshot-v1-128k", "name": "Moonshot v1 128K"},
-    ],
-    "ollama": [
-        {"id": "qwen3:235b-a22b", "name": "Qwen3 235B (Ollama)", "best": True},
-        {"id": "qwen3:32b", "name": "Qwen3 32B (Ollama)"},
-        {"id": "qwen3:8b", "name": "Qwen3 8B (Ollama)"},
-        {"id": "claude46sonnet", "name": "Claude 4.6 Sonnet (Ollama)"},
-        {"id": "gpt55", "name": "GPT-5.5 (Ollama)"},
-        {"id": "deepseek-r1:70b", "name": "DeepSeek R1 70B (Ollama)"},
-        {"id": "llama3.3:70b", "name": "Llama 3.3 70B (Ollama)"},
-    ],
-    "openai": [
-        {"id": "gpt-5.1", "name": "GPT-5.1 (OpenAI)", "best": True},
-        {"id": "gpt-5", "name": "GPT-5 (OpenAI)"},
-        {"id": "gpt-4o", "name": "GPT-4o (OpenAI)"},
-        {"id": "o3", "name": "o3 (OpenAI)"},
-        {"id": "o4-mini", "name": "o4 Mini (OpenAI)"},
-        {"id": "claude-sonnet-4-20250514", "name": "Claude Sonnet 4 (OpenAI)"},
-        {"id": "claude-opus-4-20250514", "name": "Claude Opus 4 (OpenAI)"},
-        {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro (OpenAI)"},
-    ],
-}
+# Список моделей для каждого провайдера собирается из реестра providers.PROVIDERS,
+# а не дублируется здесь. Формат ({id,name,best?}) сохранён для совместимости со
+# старым кодом; источник правды теперь один — agent/providers.py.
+MODELS = {key: [m.to_dict() for m in spec.models] for key, spec in PROVIDERS.items()}
 
 
 class LLMClient:
     """
     Адаптер для LLM через прямые API-вызовы.
-    Поддерживает: Perplexity (через cookies), Kimi, Ollama, OpenAI (GPT)
+
+    Транспорт выбирается по spec.kind из реестра providers.PROVIDERS, а не по
+    имени провайдера, поэтому подключение нового вендора не требует правок
+    здесь. Поддерживаются:
+      • kind="pplx"   — Perplexity через cookies (curl + SSE)
+      • kind="ollama" — нативный /api/chat локального Ollama
+      • kind="openai" — OpenAI-совместимый /chat/completions (OpenAI, Kimi,
+                        DeepSeek, Groq, Mistral, OpenRouter, Gemini, xAI, …)
     """
 
-    def __init__(self, provider: str = "pplx", model: str = "claude47opus"):
+    def __init__(self, provider: str = "pplx", model: str = ""):
         self.provider = provider
-        self.model = model
+        self.spec: Optional[ProviderSpec] = get_provider(provider)
+        if self.spec is None:
+            logger.warning(f"Неизвестный провайдер '{provider}' — транспорт не определён")
+        # Модель: явная → дефолт реестра. Сохраняем прежнее поведение по умолчанию.
+        self.model = model or (self.spec.default_model_id() if self.spec else "") or "claude47opus"
 
     async def chat(self, message: str) -> str:
-        """Отправить сообщение и получить ответ"""
-        if self.provider == "pplx":
+        """Отправить сообщение и получить ответ."""
+        kind = self.spec.kind if self.spec else ""
+        if kind == "pplx":
             return await self._chat_pplx(message)
-        elif self.provider == "kimi":
-            return await self._chat_kimi(message)
-        elif self.provider == "ollama":
+        if kind == "ollama":
             return await self._chat_ollama(message)
-        elif self.provider == "openai":
-            return await self._chat_openai(message)
-        else:
-            raise ValueError(f"Unknown provider: {self.provider}")
+        if kind == "openai":
+            return await self._chat_openai_compat(message)
+        raise ValueError(f"Unknown provider: {self.provider}")
 
     async def chat_with_image(self, message: str, image_b64: str,
                               filename: str = "image.png",
                               mime: str = "image/png") -> str:
-        """Сообщение + изображение (vision). pplx — через file_view-attachment.
-        ВАЖНО: PNG единственный надёжно доставляемый формат (JPEG/WebP
-        теряются бэкендом всегда). Остальные провайдеры пока без vision —
-        падают в обычный chat."""
-        if self.provider == "pplx":
+        """Сообщение + изображение (vision).
+
+        Транспорт vision зависит от kind:
+          • pplx   — file_view-attachment (PNG надёжнее JPEG/WebP);
+          • openai — content-part {type:image_url, data: URL};
+          • ollama — поле images:[base64].
+        Провайдер без vision (spec.vision=False) деградирует в текстовый chat.
+        """
+        if self.spec is None or not self.spec.vision or not image_b64:
+            return await self.chat(message)
+        kind = self.spec.kind
+        if kind == "pplx":
             return await self._chat_pplx(message, image_b64=image_b64,
                                          image_filename=filename, image_mime=mime)
+        if kind == "openai":
+            return await self._chat_openai_compat(message, image_b64=image_b64, image_mime=mime)
+        if kind == "ollama":
+            return await self._chat_ollama(message, image_b64=image_b64)
         return await self.chat(message)
 
     async def _chat_pplx(self, message: str, image_b64: str = "",
@@ -320,97 +313,96 @@ class LLMClient:
             logger.error(f"Pplx error: {e}")
             return json.dumps({"type": "wait", "thought": f"Pplx error: {e}", "seconds": 1}, ensure_ascii=False)
 
-    async def _chat_kimi(self, message: str) -> str:
-        """Вызов Kimi AI через API"""
+    def _resolve_api_key(self) -> str:
+        """Ключ из переменной окружения, названной в spec.api_key_env.
+        Для локальных серверов (requires_key=False) отсутствие ключа — норма."""
+        env = self.spec.api_key_env if self.spec else ""
+        return os.environ.get(env, "") if env else ""
+
+    async def _chat_openai_compat(self, message: str, image_b64: str = "",
+                                  image_mime: str = "image/png") -> str:
+        """Универсальный транспорт OpenAI-совместимых API.
+
+        Один метод обслуживает OpenAI, Kimi, DeepSeek, Groq, Mistral,
+        OpenRouter, Gemini (compat-слой), xAI, LM Studio, LocalAI и любого
+        нового вендора с тем же контрактом — различия только в base_url,
+        имени ключа и названии модели (всё берётся из ProviderSpec).
+        """
+        label = self.spec.label if self.spec else self.provider
         try:
             import httpx
-            api_key = os.environ.get("KIMI_API_KEY", "")
-            if not api_key:
-                logger.warning("KIMI_API_KEY not set. Using fallback.")
-                return '{"type": "wait", "thought": "Kimi API key не настроен", "seconds": 1}'
+
+            api_key = self._resolve_api_key()
+            if not api_key and self.spec and self.spec.requires_key:
+                env = self.spec.api_key_env or "API_KEY"
+                logger.warning(f"{env} not set. Using fallback.")
+                return json.dumps(
+                    {"type": "wait", "thought": f"{label}: не задан {env}", "seconds": 1},
+                    ensure_ascii=False,
+                )
+
+            if image_b64:
+                content: object = [
+                    {"type": "text", "text": message},
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:{image_mime};base64,{image_b64}"}},
+                ]
+            else:
+                content = message
+
+            headers = {"Content-Type": "application/json"}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
 
             async with httpx.AsyncClient(timeout=120) as client:
                 resp = await client.post(
-                    "https://api.moonshot.cn/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
+                    self.spec.chat_url,
+                    headers=headers,
                     json={
-                        "model": self.model or "moonshot-v1-8k",
-                        "messages": [{"role": "user", "content": message}],
+                        "model": self.model or self.spec.default_model_id(),
+                        "messages": [{"role": "user", "content": content}],
                         "max_tokens": 2048,
                     },
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                content = data["choices"][0]["message"]["content"]
-                return content
+                return data["choices"][0]["message"]["content"]
 
         except ImportError:
             logger.error("httpx not installed.")
             return '{"type": "wait", "thought": "httpx не установлен", "seconds": 1}'
         except Exception as e:
-            logger.error(f"Kimi error: {e}")
-            return json.dumps({"type": "wait", "thought": f"Kimi error: {e}", "seconds": 1}, ensure_ascii=False)
+            logger.error(f"{label} error: {e}")
+            return json.dumps({"type": "wait", "thought": f"{label} error: {e}", "seconds": 1},
+                              ensure_ascii=False)
 
-    async def _chat_ollama(self, message: str) -> str:
-        """Вызов Ollama через локальный API"""
+    async def _chat_ollama(self, message: str, image_b64: str = "") -> str:
+        """Нативный транспорт Ollama (/api/chat).
+
+        Ключ не нужен: сервер локальный. Vision передаётся полем images:[base64]
+        (без data:-префикса) — его принимают qwen3-vl, llama3.2-vision, gemma3.
+        """
         try:
             import httpx
-            model = self.model or "qwen3:235b-a22b"
+
+            payload = {
+                "model": self.model or self.spec.default_model_id(),
+                "messages": [{"role": "user", "content": message}],
+                "stream": False,
+            }
+            if image_b64:
+                payload["messages"][0]["images"] = [image_b64]
 
             async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(
-                    "http://localhost:11434/api/chat",
-                    json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": message}],
-                        "stream": False,
-                    },
-                )
+                resp = await client.post(self.spec.chat_url, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
-                content = data.get("message", {}).get("content", "")
-                return content
+                return data.get("message", {}).get("content", "")
 
         except ImportError:
             logger.error("httpx not installed.")
             return '{"type": "wait", "thought": "httpx не установлен", "seconds": 1}'
         except Exception as e:
             logger.error(f"Ollama error: {e}")
-            return json.dumps({"type": "wait", "thought": f"Ollama error: {e}", "seconds": 1}, ensure_ascii=False)
-
-    async def _chat_openai(self, message: str) -> str:
-        """Вызов OpenAI (GPT) через REST API"""
-        try:
-            import httpx
-            api_key = os.environ.get("OPENAI_API_KEY", "")
-            if not api_key:
-                logger.warning("OPENAI_API_KEY not set. Using fallback.")
-                return '{"type": "wait", "thought": "OpenAI API key не настроен", "seconds": 1}'
-
-            async with httpx.AsyncClient(timeout=60) as client:
-                resp = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": self.model or "gpt-5.1",
-                        "messages": [{"role": "user", "content": message}],
-                        "max_tokens": 2048,
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                content = data["choices"][0]["message"]["content"]
-                return content
-
-        except ImportError:
-            logger.error("httpx not installed.")
-            return '{"type": "wait", "thought": "httpx не установлен", "seconds": 1}'
-        except Exception as e:
-            logger.error(f"OpenAI error: {e}")
-            return json.dumps({"type": "wait", "thought": f"OpenAI error: {e}", "seconds": 1}, ensure_ascii=False)
+            return json.dumps({"type": "wait", "thought": f"Ollama error: {e}", "seconds": 1},
+                              ensure_ascii=False)

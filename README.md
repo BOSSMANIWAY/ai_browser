@@ -183,9 +183,53 @@ playwright install chromium
 
 ### 3. Настройка LLM
 
-**Perplexity (по умолчанию):** cookies авторизованной сессии в `.pplx_cookies.txt` в корне проекта (в `.gitignore`) или через `export PPLX_COOKIES_FILE=/path/to/cookies.txt`, модель `claude47opus`
+Провайдеры подключаются через единый реестр `agent/providers.py` — цикл агента,
+веб-интерфейс и CLI не содержат списков вендоров. Поддерживается 12 из коробки:
+**Perplexity** (по умолчанию), OpenAI, Kimi, DeepSeek, Groq, Mistral, OpenRouter,
+Gemini, xAI и локальные **Ollama / LM Studio / LocalAI**.
 
-**Kimi:** `export KIMI_API_KEY="sk-..."` | **Ollama:** `ollama serve` | **OpenAI:** `export OPENAI_API_KEY="sk-..."`
+Быстрый старт:
+
+```bash
+cp .env.example .env          # заполните только свой провайдер
+set -a; source .env; set +a
+python3 main.py --list-providers            # кто есть и где какого ключа не хватает
+python3 main.py --provider deepseek --task "..."
+```
+
+Два способа подключить модель:
+
+**1. Бесплатно — Perplexity через браузер (по умолчанию).** Официального API у
+Perplexity нет, поэтому агент использует вашу авторизованную сессию: запрос
+идёт на тот же эндпоинт, что и сайт, — `POST /rest/sse/perplexity_ask`.
+Нужно один раз скопировать cookie из DevTools:
+
+1. Войдите на https://www.perplexity.ai и задайте любой вопрос.
+2. `F12` → вкладка **Network** → найдите запрос `perplexity_ask`.
+3. Из **Request Headers** скопируйте значение заголовка `Cookie` (одной строкой,
+   обязательно с httpOnly-куками `__Secure-1PSID`, `__Secure-1PSIDTS`).
+4. Сохраните в `.pplx_cookies.txt` в корне проекта (файл в `.gitignore`) или
+   укажите путь `export PPLX_COOKIES_FILE=/path/to/file`.
+
+Модель по умолчанию — `claude47opus`. По мере истечения сессии `HTTP 403` —
+повторите шаги 1–4. Пошагово и с поиском неполадок:
+[docs/PROVIDERS.md](docs/PROVIDERS.md).
+
+**2. Платно — вендоры с API-ключом** (стабильнее, не зависят от cookie и
+лимитов аккаунта). Достаточно экспортировать ключ:
+
+- **Kimi:** `export KIMI_API_KEY="sk-..."`; для международного ключа
+  `export KIMI_BASE_URL=https://api.moonshot.ai/v1` (по умолчанию включён китайский `.cn`)
+- **Ollama:** бесплатно и локально — `ollama serve` + `ollama pull qwen3:32b`
+  (vision: `ollama pull qwen3-vl:8b`)
+- **OpenAI:** `export OPENAI_API_KEY="sk-..."`
+- **DeepSeek / Groq / Mistral / OpenRouter / Gemini / xAI:** аналогично, свои
+  переменные (`DEEPSEEK_API_KEY`, `GROQ_API_KEY`, ...); **LM Studio / LocalAI** —
+  локальные серверы, ключ не нужен.
+
+Эндпоинт любого провайдера меняется переменной `<КЛЮЧ>_BASE_URL` без правки кода;
+веб-селекторы и список моделей подхватывают реестр автоматически через
+`GET /api/providers`. Подробнее — [docs/PROVIDERS.md](docs/PROVIDERS.md).
 
 ### 4. Запуск
 
@@ -380,7 +424,8 @@ ai_browser/
 │   ├── goal_detector.py       # Runtime-детектор цели
 │   ├── user_profile.py        # Персональные данные (.gitignore!)
 │   ├── memory.py              # Память агента
-│   └── llm_client.py          # Perplexity/Kimi/Ollama/OpenAI
+│   ├── providers.py           # Реестр LLM-вендоров (модели, эндпоинты, ключи)
+│   └── llm_client.py          # Транспорты: OpenAI-совместимый / Ollama / Perplexity
 │
 ├── prompts/
 │   └── system.py              # Системный промпт + user template

@@ -187,15 +187,21 @@ def main():
     parser.add_argument(
         "--model", "-m",
         type=str,
-        default="claude47opus",
-        help="Модель LLM",
+        default="",
+        help="Модель LLM (по умолчанию — рекомендованная модель провайдера из реестра)",
     )
     parser.add_argument(
         "--provider", "-p",
         type=str,
-        choices=["pplx", "kimi", "ollama"],
         default="pplx",
-        help="Провайдер LLM",
+        metavar="NAME",
+        help="Провайдер LLM из реестра agent/providers.py "
+             "(список: --list-providers)",
+    )
+    parser.add_argument(
+        "--list-providers",
+        action="store_true",
+        help="Показать доступных провайдеров, их модели и переменные окружения",
     )
     parser.add_argument(
         "--max-steps",
@@ -219,12 +225,39 @@ def main():
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    # Справочник по подключённым LLM-вендорам (реестр agent/providers.py).
+    if args.list_providers:
+        from agent.providers import list_providers
+        print("\nДоступные провайдеры LLM:\n")
+        for p in list_providers():
+            need = "ключ не нужен" if not p["requires_key"] else f"env: {p['key_env']}"
+            print(f"  {p['key']:<11} {p['label']:<24} {need}")
+            print(f"  {'':<11} модель по умолчанию: {p['default_model']}"
+                  f"{'  |  vision: да' if p['vision'] else ''}")
+            if p.get("note"):
+                print(f"  {'':<11} {p['note']}")
+            print()
+        print("Подключить нового вендора: docs/PROVIDERS.md\n")
+        return
+
     if args.task:
         # CLI режим
         from browser.controller import BrowserController
         from agent.loop import AgentLoop
         from agent.memory import AgentMemory
         from agent.llm_client import LLMClient
+        from agent.providers import get_provider, list_providers
+
+        spec = get_provider(args.provider)
+        if spec is None:
+            known = ", ".join(p["key"] for p in list_providers())
+            print(f"\n[ERROR] Неизвестный провайдер '{args.provider}'. Доступно: {known}")
+            print("Подробности: python3 main.py --list-providers")
+            return
+        # Модель по умолчанию берём из реестра — иначе при смене вендора
+        # улетит запрос к несуществующей модели другого провайдера.
+        if not args.model:
+            args.model = spec.default_model_id()
 
         async def run_cli():
             controller = BrowserController()

@@ -119,13 +119,9 @@
                 </div>
                 <div class="model-select">
                     <label>Модель</label>
-                    <select id="providerSelect" onchange="onProviderChange()">
-                        <option value="pplx">Perplexity AI</option>
-                        <option value="kimi">Kimi</option>
-                        <option value="ollama">Ollama</option>
-                        <option value="openai">OpenAI (GPT)</option>
-                    </select>
+                    <select id="providerSelect" onchange="onProviderChange()"></select>
                     <select id="modelSelect" onchange="onModelChange()"></select>
+                    <div id="providerHint" style="font-size:11px;color:var(--text3);line-height:1.4;"></div>
                 </div>
             </div>
             <div class="tabs-panel">
@@ -175,59 +171,54 @@
         let currentProvider = "pplx";
         let currentModel = "claude47opus";
 
-        // Список моделей для каждого провайдера
-        const MODELS = {
-            pplx: [
-                {id: "claude47opus", name: "Claude 4.7 Opus (Pplx)", best: true},
-                {id: "claude46sonnet", name: "Claude 4.6 Sonnet (Pplx)"},
-                {id: "gpt55", name: "GPT-5.5 (Pplx)"},
-                {id: "gpt54", name: "GPT-5.4 (Pplx)"},
-                {id: "grok4", name: "Grok 4 (Pplx)"},
-                {id: "claudecode", name: "Claude Code (Pplx)"},
-                {id: "codex4", name: "Codex 4 (Pplx)"},
-                {id: "gemini30flash", name: "Gemini 3.0 Flash (Pplx)"},
-                {id: "o3pro", name: "o3 Pro (Pplx)"},
-                {id: "turbo", name: "Turbo (Pplx)"},
-            ],
-            kimi: [
-                {id: "k2d5", name: "K2 D5 (Kimi)", best: true},
-                {id: "k2", name: "K2 (Kimi)"},
-                {id: "moonshot-v1-8k", name: "Moonshot v1 8K"},
-                {id: "moonshot-v1-32k", name: "Moonshot v1 32K"},
-                {id: "moonshot-v1-128k", name: "Moonshot v1 128K"},
-            ],
-            ollama: [
-                {id: "qwen3:235b-a22b", name: "Qwen3 235B (Ollama)", best: true},
-                {id: "qwen3:32b", name: "Qwen3 32B (Ollama)"},
-                {id: "qwen3:8b", name: "Qwen3 8B (Ollama)"},
-                {id: "claude46sonnet", name: "Claude 4.6 Sonnet (Ollama)"},
-                {id: "gpt55", name: "GPT-5.5 (Ollama)"},
-                {id: "deepseek-r1:70b", name: "DeepSeek R1 70B (Ollama)"},
-                {id: "llama3.3:70b", name: "Llama 3.3 70B (Ollama)"},
-            ],
-            openai: [
-                {id: "gpt-5.1", name: "GPT-5.1 (OpenAI)", best: true},
-                {id: "gpt-5", name: "GPT-5 (OpenAI)"},
-                {id: "gpt-4o", name: "GPT-4o (OpenAI)"},
-                {id: "o3", name: "o3 (OpenAI)"},
-                {id: "o4-mini", name: "o4 Mini (OpenAI)"},
-                {id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4 (OpenAI)"},
-                {id: "claude-opus-4-20250514", name: "Claude Opus 4 (OpenAI)"},
-                {id: "gemini-2.5-pro", name: "Gemini 2.5 Pro (OpenAI)"},
-            ],
-        };
+        // Провайдеры и модели приходят с бэкенда (GET /api/providers) —
+        // единый источник правды с реестром agent/providers.py.
+        let PROVIDERS = [];
 
-        // Загрузка моделей при старте
-        function loadModels(provider) {
-            const models = MODELS[provider] || [];
+        function loadModels(providerKey) {
+            const p = PROVIDERS.find(x => x.key === providerKey);
+            const models = p ? p.models : [];
             const sel = document.getElementById('modelSelect');
-            sel.innerHTML = models.map(m => 
-                `<option value="${m.id}" ${m.best ? 'title="Лучшая"' : ''}>${m.name}</option>`
-            ).join('');
-            if (models.length > 0) {
-                currentModel = models.find(m => m.best)?.id || models[0].id;
-                sel.value = currentModel;
+            sel.innerHTML = models.map(m =>
+                `<option value="${m.id}">${m.name}</option>`).join('');
+            if (models.length) {
+                const def = models.find(m => m.best) || models[0];
+                sel.value = def.id;
+                currentModel = def.id;
             }
+            // Подсказка: нужен ли API-ключ / есть ли vision / куда идёт запрос
+            const hint = document.getElementById('providerHint');
+            if (hint && p) {
+                const bits = [];
+                if (p.requires_key && p.has_key === false)
+                    bits.push(`нет ключа: задайте ${p.key_env}`);
+                else if (p.requires_key && p.has_key === true) bits.push('ключ задан');
+                else if (!p.requires_key) bits.push('без ключа');
+                bits.push(p.vision ? 'vision есть' : 'только текст');
+                // Смена эндпоинта без правки кода (Kimi .cn ↔ .ai, свой прокси)
+                if (p.base_url_env && p.base_url)
+                    bits.push(`эндпоинт: ${p.base_url} (${p.base_url_env})`);
+                hint.textContent = bits.join(' · ');
+            }
+        }
+
+        async function loadProviders() {
+            try {
+                const r = await fetch('/api/providers');
+                const data = await r.json();
+                PROVIDERS = data.providers || [];
+            } catch (e) {
+                console.error('Не удалось загрузить список провайдеров:', e);
+                return;
+            }
+            const pSel = document.getElementById('providerSelect');
+            pSel.innerHTML = PROVIDERS.map(p =>
+                `<option value="${p.key}">${p.label}</option>`).join('');
+            // Сохраняем текущий выбор, если он всё ещё доступен
+            if (!PROVIDERS.find(p => p.key === currentProvider))
+                currentProvider = pSel.value;
+            else pSel.value = currentProvider;
+            loadModels(currentProvider);
         }
 
         function onProviderChange() {
@@ -481,6 +472,7 @@
             this.style.height = Math.min(this.scrollHeight, 120) + 'px';
         });
 
+        loadProviders();
         connect();
     </script>
 </body>

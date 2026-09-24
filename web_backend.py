@@ -23,8 +23,7 @@ from browser.agent_overlay import AgentOverlay
 from agent.loop import AgentLoop
 from agent.memory import AgentMemory
 from agent.llm_client import LLMClient
-from agent.memory import AgentMemory
-from agent.llm_client import LLMClient
+from agent.providers import get_provider, list_providers, default_model, DEFAULT_PROVIDER
 from analysis.page_analyzer import PageAnalyzer
 
 logging.basicConfig(level=logging.INFO)
@@ -182,9 +181,11 @@ def get_or_create_controller():
     if browser_controller is None:
         browser_controller = BrowserController()
         memory = AgentMemory()
-        llm_client = LLMClient(provider="pplx", model="claude47opus")
+        # Модель не хардкодим: LLMClient подставит default_model из реестра,
+        # а все потребители читают её уже разрешённой из llm_client.model.
+        llm_client = LLMClient(provider=DEFAULT_PROVIDER)
         tab_manager = TabManager(browser_controller)
-        page_analyzer = PageAnalyzer(llm_client, "claude47opus")
+        page_analyzer = PageAnalyzer(llm_client, llm_client.model)
         agent_overlay = AgentOverlay(browser_controller)
 
     return browser_controller
@@ -205,6 +206,16 @@ async def network_report(reload: bool = True, bodies: bool = False):
     except Exception as e:
         logger.error(f"network_report error: {e}", exc_info=True)
         return {"error": str(e)}
+
+
+@app.get("/api/providers")
+async def providers():
+    """Реестр LLM-провайдеров с их моделями — источник правды для селекторов UI.
+
+    Фронтенд не хранит список моделей в коде: добавление провайдера в
+    agent/providers.py автоматически отражается в интерфейсе.
+    """
+    return {"providers": list_providers()}
 
 
 @app.get("/web/{path:path}")
@@ -247,7 +258,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         memory=memory,
                         llm_client=llm_client,
                         max_steps=50,
-                        model="claude47opus",
+                        model=llm_client.model,
                     )
 
                     browser_controller = controller
@@ -273,10 +284,23 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 # Запуск задачи агента
                 prompt = payload.get("prompt", "")
                 provider = payload.get("provider", "pplx")
-                model = payload.get("model", "claude47opus")
+                model = payload.get("model", "")
                 if not prompt:
                     await websocket.send_json({"type": "error", "message": "Нет задачи"})
                     continue
+
+                # Неизвестный провайдер упал бы с ValueError внутри фоновой
+                # задачи и задача молча умерла бы — отсекаем здесь.
+                spec = get_provider(provider)
+                if spec is None:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": f"Неизвестный провайдер '{provider}'. "
+                                   f"Доступны: {', '.join(p['key'] for p in list_providers())}"
+                    })
+                    continue
+                if not model:
+                    model = spec.default_model_id()
 
                 task_id = str(uuid.uuid4())[:8]
 
@@ -349,13 +373,17 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         logger.error(f"WebSocket error: {e}", exc_info=True)
 
 
-async def run_agent_task(websocket: WebSocket, task_id: str, prompt: str, provider: str = "pplx", model: str = "claude47opus"):
+async def run_agent_task(websocket: WebSocket, task_id: str, prompt: str,
+                         provider: str = DEFAULT_PROVIDER, model: str = ""):
     """Запуск задачи агента. Весь цикл — в AgentLoop v2, здесь только WebSocket-мост."""
     global agent_loop
 
     controller = browser_controller
     mem = AgentMemory()
     llm = LLMClient(provider=provider, model=model)
+    # Пустой model LLMClient уже разрешил в дефолт реестра — берём его,
+    # чтобы планировщик и цикл работали с одним и тем же именем модели.
+    model = llm.model
 
     async def send_progress(text: str):
         try:
